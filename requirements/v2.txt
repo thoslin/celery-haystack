@@ -5,3 +5,4 @@ celery
 Whoosh
 flake8
 coverage
+redis

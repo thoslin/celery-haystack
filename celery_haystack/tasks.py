@@ -1,3 +1,5 @@
+import redis
+
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
 from django.db.models.loading import get_model
@@ -119,44 +121,45 @@ class CeleryHaystackSignalHandler(Task):
             current_index_name = ".".join([current_index.__class__.__module__,
                                            current_index.__class__.__name__])
 
-            if action == 'delete':
-                # If the object is gone, we'll use just the identifier
-                # against the index.
-                try:
-                    handler_options = self.get_handler_options(**kwargs)
-                    current_index.remove_object(identifier, **handler_options)
-                except Exception as exc:
-                    logger.exception(exc)
-                    self.retry(exc=exc)
-                else:
-                    msg = ("Deleted '%s' (with %s)" %
-                           (identifier, current_index_name))
-                    logger.debug(msg)
-                    return msg
-            elif action == 'update':
-                # and the instance of the model class with the pk
-                instance = self.get_instance(model_class, pk, **kwargs)
-                if instance is None:
-                    logger.debug("Failed updating '%s' (with %s)" %
-                                 (identifier, current_index_name))
-                    raise ValueError("Couldn't load object '%s'" % identifier)
+            with redis.Redis().lock("xapian_write_lock"):
+                if action == 'delete':
+                    # If the object is gone, we'll use just the identifier
+                    # against the index.
+                    try:
+                        handler_options = self.get_handler_options(**kwargs)
+                        current_index.remove_object(identifier, **handler_options)
+                    except Exception as exc:
+                        logger.exception(exc)
+                        self.retry(exc=exc)
+                    else:
+                        msg = ("Deleted '%s' (with %s)" %
+                               (identifier, current_index_name))
+                        logger.debug(msg)
+                        return msg
+                elif action == 'update':
+                    # and the instance of the model class with the pk
+                    instance = self.get_instance(model_class, pk, **kwargs)
+                    if instance is None:
+                        logger.debug("Failed updating '%s' (with %s)" %
+                                     (identifier, current_index_name))
+                        raise ValueError("Couldn't load object '%s'" % identifier)
 
-                # Call the appropriate handler of the current index and
-                # handle exception if neccessary
-                try:
-                    handler_options = self.get_handler_options(**kwargs)
-                    current_index.update_object(instance, **handler_options)
-                except Exception as exc:
-                    logger.exception(exc)
-                    self.retry(exc=exc)
+                    # Call the appropriate handler of the current index and
+                    # handle exception if neccessary
+                    try:
+                        handler_options = self.get_handler_options(**kwargs)
+                        current_index.update_object(instance, **handler_options)
+                    except Exception as exc:
+                        logger.exception(exc)
+                        self.retry(exc=exc)
+                    else:
+                        msg = ("Updated '%s' (with %s)" %
+                               (identifier, current_index_name))
+                        logger.debug(msg)
+                        return msg
                 else:
-                    msg = ("Updated '%s' (with %s)" %
-                           (identifier, current_index_name))
-                    logger.debug(msg)
-                    return msg
-            else:
-                logger.error("Unrecognized action '%s'. Moving on..." % action)
-                raise ValueError("Unrecognized action %s" % action)
+                    logger.error("Unrecognized action '%s'. Moving on..." % action)
+                    raise ValueError("Unrecognized action %s" % action)
 
 
 class CeleryHaystackUpdateIndex(Task):

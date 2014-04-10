@@ -23,6 +23,8 @@ if settings.CELERY_HAYSTACK_TRANSACTION_SAFE and not getattr(settings, 'CELERY_A
 else:
     from celery.task import Task  # noqa
 
+r = redis.Redis(settings.REDIS_HOST, settings.REDIS_PORT)
+
 
 class CeleryHaystackSignalHandler(Task):
     using = settings.CELERY_HAYSTACK_DEFAULT_ALIAS
@@ -121,7 +123,7 @@ class CeleryHaystackSignalHandler(Task):
             current_index_name = ".".join([current_index.__class__.__module__,
                                            current_index.__class__.__name__])
 
-            with redis.Redis().lock("xapian_write_lock"):
+            with r.lock("xapian_write_lock"):
                 if action == 'delete':
                     # If the object is gone, we'll use just the identifier
                     # against the index.
